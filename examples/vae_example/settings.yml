@@ -1,7 +1,7 @@
 data:
   batch_size: 100
-  smiles_file: datasets/0SelectedSMILES_QM9.txt
-  type_of_encoding: 0
+  smiles_file: datasets/moses_train.csv
+  type_of_encoding: 1
 
 decoder:
   latent_dimension: 50

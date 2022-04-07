@@ -45,6 +45,7 @@ import yaml
 from rdkit import rdBase
 from rdkit.Chem import MolFromSmiles
 from torch import nn
+from torch.utils.tensorboard import SummaryWriter
 
 import selfies as sf
 from data_loader import \
@@ -55,13 +56,13 @@ rdBase.DisableLog('rdApp.error')
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def _make_dir(directory):
-    os.makedirs(directory)
-
+def soft_mkdir(path):
+    if not os.path.exists(path):
+        os.mkdir(path)
 
 def save_models(encoder, decoder, epoch):
     out_dir = './saved_models/{}'.format(epoch)
-    _make_dir(out_dir)
+    soft_mkdir(out_dir)
     torch.save(encoder, '{}/E'.format(out_dir))
     torch.save(decoder, '{}/D'.format(out_dir))
 
@@ -269,6 +270,11 @@ def train_model(vae_encoder, vae_decoder,
 
     data_train = data_train.clone().detach().to(device)
     num_batches_train = int(len(data_train) / batch_size)
+    
+    #set up tensorboard 
+    logdir='tensorboard_logs'
+    soft_mkdir(logdir)
+    writer = SummaryWriter(logdir)
 
     quality_valid_list = [0, 0, 0, 0]
     for epoch in range(num_epochs):
@@ -313,7 +319,7 @@ def train_model(vae_encoder, vae_decoder,
             optimizer_encoder.step()
             optimizer_decoder.step()
 
-            if batch_iteration % 30 == 0:
+            if batch_iteration % 1000 == 0:
                 end = time.time()
 
                 # assess reconstruction quality
@@ -327,8 +333,12 @@ def train_model(vae_encoder, vae_decoder,
                          % (epoch, batch_iteration, num_batches_train,
                             loss.item(), quality_train, quality_valid,
                             end - start)
+                writer.add_scalar('BatchLoss/train', loss.item(), batch_iteration)
+                writer.add_scalar('BatchQuality/train', quality_train, batch_iteration)
+                writer.add_scalar('BatchQuality/valid', quality_valid, batch_iteration)
                 print(report)
                 start = time.time()
+        save_models(encoder=vae_encoder,decoder=vae_decoder,epoch=epoch)
 
         quality_valid = quality_in_valid_set(vae_encoder, vae_decoder,
                                              data_valid, batch_size)
@@ -349,6 +359,8 @@ def train_model(vae_encoder, vae_decoder,
                  % (corr * 100. / sample_num, unique * 100. / sample_num,
                     quality_valid)
         print(report)
+        writer.add_scalar('Epochquality/valid', quality_valid, epoch)
+        writer.add_scalar('Epochquality/increase', quality_increase, epoch)
 
         with open('results.dat', 'a') as content:
             content.write(report + '\n')
@@ -409,8 +421,12 @@ def get_selfie_and_smiles_encodings_for_dataset(file_path):
 
     largest_smiles_len = len(max(smiles_list, key=len))
 
-    print('--> Translating SMILES to SELFIES...')
-    selfies_list = list(map(sf.encoder, smiles_list))
+    if 'selfies' in df.columns:
+        print('--> Getting SELFIES from input file')
+        selfies_list = df['selfies']
+    else:
+        print('--> Translating SMILES to SELFIES...')
+        selfies_list = list(map(sf.encoder, smiles_list))
 
     all_selfies_symbols = sf.get_alphabet_from_selfies(selfies_list)
     all_selfies_symbols.add('[nop]')
